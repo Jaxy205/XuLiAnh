@@ -12,7 +12,8 @@ from .logic import (
     check_optical_flow, 
     check_gathering, 
     get_centroid,
-    check_fall_simple
+    check_fall_simple,
+    analyze_trajectories
 )
 from .tracker import TrackerWrapper
 from .visualizer import Visualizer
@@ -39,17 +40,15 @@ class HybridAnomalyDetector:
             iou_threshold=config.SORT_IOU_THRESHOLD
         )
         
-        # Khởi tạo các mô hình Deep Learning
-        # Lưu ý: Đã loại bỏ hoàn toàn các mô hình Deep Learning (CNN-LSTM, Autoencoder)
-        # theo yêu cầu "không dùng học máy"
-        self.cnn_lstm_model = None 
-        self.autoencoder_model = None
-        
-        # Bộ hiển thị (Visualizer)
         self.visualizer = Visualizer(config)
+        
         
         # Frame trước đó để tính Optical Flow
         self.prev_gray = None
+        
+        # Trạng thái quỹ đạo (Caching kết quả phân tích)
+        self.trajectory_status = {}
+        self.process_count = 0
         
         print("✓ Hệ thống khởi tạo thành công!\n")
     
@@ -64,7 +63,6 @@ class HybridAnomalyDetector:
         
         curr_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         
-        # Bước 1: Nhận diện người bằng YOLOv8
         results = self.yolo_model(frame, verbose=False)[0]
         detections = []
         for box in results.boxes:
@@ -76,15 +74,20 @@ class HybridAnomalyDetector:
         
         detections = np.array(detections) if detections else np.empty((0, 5))
         
-        # Bước 2: Theo dõi đối tượng bằng SORT
         tracked_objects = self.tracker.update(detections)
         
-        # Chuẩn bị cấu trúc dữ liệu
+        # Cập nhật bộ đếm frame xử lý nội bộ
+        self.process_count += 1
+        
+        # Phân tích quỹ đạo định kỳ (ví dụ: mỗi 30 frame ~ 1 giây)
+        if self.config.ENABLE_TRAJECTORY_DETECTION and self.process_count % 30 == 0:
+            current_trajectories = self.tracker.get_trajectories()
+            self.trajectory_status = analyze_trajectories(current_trajectories)
+
         centroid_list = []
         active_ids = []
         detection_results = {}
         
-        # Bước 3-6: Xử lý từng người được theo dõi
         for track in tracked_objects:
             x1, y1, x2, y2, person_id = track
             x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
@@ -95,12 +98,10 @@ class HybridAnomalyDetector:
             centroid = get_centroid(bbox)
             centroid_list.append((person_id, centroid))
             
-            # Khởi tạo trạng thái mặc định
             status = "NORMAL"
             color = self.config.COLOR_NORMAL
             info = {}
             
-            # ===== ƯU TIÊN 1: PHÁT HIỆN NGÃ (ĐƠN GIẢN) =====
             if self.config.ENABLE_FALLING_DETECTION:
                 is_falling, fall_conf = self.detect_fall(bbox)
                 if is_falling:
@@ -108,7 +109,6 @@ class HybridAnomalyDetector:
                     color = self.config.COLOR_FALLING
                     info['fall_confidence'] = fall_conf
             
-            # ===== ƯU TIÊN 2: PHÁT HIỆN CHẠY =====
             if (status == "NORMAL" and self.config.ENABLE_RUNNING_DETECTION 
                 and self.prev_gray is not None):
                 is_running, flow_magnitude = check_optical_flow(
@@ -127,15 +127,24 @@ class HybridAnomalyDetector:
                     status = "RUNNING"
                     color = self.config.COLOR_RUNNING
                     info['flow_magnitude'] = flow_magnitude
+
+            if (status == "NORMAL" and self.config.ENABLE_TRAJECTORY_DETECTION 
+                and person_id in self.trajectory_status):
+                traj_res = self.trajectory_status[person_id]
+                if traj_res == "ANOMALY_TRAJECTORY":
+                    status = "ANOMALY_TRAJECTORY"
+                    color = self.config.COLOR_TRAJECTORY_ANOMALY
+                    info['traj_anomaly'] = True
             
             detection_results[person_id] = (status, color, bbox, info)
         
-        # ===== ƯU TIÊN 3: PHÁT HIỆN TỤ TẬP =====
         gathering_ids = set()
         gathering_groups = []
         if self.config.ENABLE_GATHERING_DETECTION:
+            # Use trajectories for gathering detection
+            current_trajectories = self.tracker.get_trajectories()
             gathering_groups = check_gathering(
-                centroid_list,
+                current_trajectories,
                 eps=self.config.GATHERING_EPS,
                 min_samples=self.config.GATHERING_MIN_SAMPLES
             )
@@ -154,8 +163,8 @@ class HybridAnomalyDetector:
                             info
                         )
         
-        # Bước 7: Hiển thị kết quả lên frame
         annotated_frame = frame.copy()
+        
         annotated_frame = self.visualizer.draw_individual_boxes(
             annotated_frame, detection_results, gathering_ids
         )

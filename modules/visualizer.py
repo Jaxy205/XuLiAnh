@@ -20,8 +20,8 @@ class Visualizer:
         """Draw individual bounding boxes for non-gathering persons"""
         for person_id, (status, color, bbox, info) in detection_results.items():
             if person_id not in gathering_ids:
-                # Chỉ vẽ nếu KHÔNG phải là NORMAL (theo yêu cầu người dùng)
-                if status != "NORMAL":
+                # Chỉ vẽ nếu là RUNNING hoặc FALLING (theo yêu cầu người dùng)
+                if status in ["RUNNING", "FALLING"]:
                     x1, y1, x2, y2 = bbox
                     
                     # Draw bounding box
@@ -32,6 +32,10 @@ class Visualizer:
                     self._draw_label(frame, label, x1, y1, color)
         
         return frame
+    
+        
+        return frame
+    
     
     def draw_gathering_groups(
         self,
@@ -81,8 +85,6 @@ class Visualizer:
             label += f" {info['fall_confidence']:.2f}"
         elif 'flow_magnitude' in info:
             label += f" {info['flow_magnitude']:.2f}"
-        elif 'recon_error' in info:
-            label += f" {info['recon_error']:.3f}"
         return label
     
     def _draw_label(

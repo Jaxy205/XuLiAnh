@@ -6,6 +6,12 @@ Cài đặt: Optical Flow (Luồng quang học) cho phát hiện chạy và Kho�
 import cv2
 import numpy as np
 from typing import List, Tuple, Dict
+try:
+    from sklearn.cluster import KMeans
+    SKLEARN_AVAILABLE = True
+except ImportError:
+    SKLEARN_AVAILABLE = False
+
 
 
 def check_optical_flow(prev_gray: np.ndarray, curr_gray: np.ndarray, 
@@ -83,97 +89,117 @@ def check_optical_flow(prev_gray: np.ndarray, curr_gray: np.ndarray,
     return is_running, float(mean_magnitude)
 
 
-def check_gathering(centroid_list: List[Tuple[int, Tuple[float, float]]], 
+def check_gathering(trajectories: Dict[int, List[Tuple[int, int]]], 
                     eps: float = 100.0, 
                     min_samples: int = 3) -> List[List[int]]:
     """
-    Phát hiện TỤ TẬP sử dụng Khoảng cách Euclid (Đơn giản hóa)
+    Phát hiện TỤ TẬP sử dụng Trajectory Clustering (Vị trí + Vận tốc)
     
-    Nguyên lý:
-    - Tính khoảng cách giữa từng cặp người.
-    - Nếu khoảng cách < eps (ngưỡng), coi là họ đang đứng gần nhau.
-    - Nếu một nhóm có số lượng người >= min_samples -> Tụ tập.
+    Nguyên lý cải tiến:
+    - Không chỉ xét khoảng cách vị trí (Spatial) mà còn xét sự tương đồng chuyển động.
+    - Feature vector: [x, y, weight * vx, weight * vy]
+    - Nhóm người đi cùng nhau sẽ có vị trí gần và vận tốc tương đương.
     
     Tham số:
-        centroid_list: Danh sách (id, (x, y))
-        eps: Khoảng cách tối đa để cùng nhóm (tương đương distance_threshold)
-        min_samples: Kích thước nhóm tối thiểu (tương đương min_group_size)
+        trajectories: Dict {id: list of points}
+        eps: Khoảng cách tối đa (đã cân bằng trọng số)
+        min_samples: Số người tối thiểu
     
     Trả về:
         Danh sách các nhóm tụ tập.
     """
-    
-    if len(centroid_list) < min_samples:
+    if len(trajectories) < min_samples:
         return []
+        
+    ids = list(trajectories.keys())
+    features = []
     
-    person_ids = [item[0] for item in centroid_list]
-    centroids = np.array([item[1] for item in centroid_list])
+    velocity_weight = 15.0 # Trọng số cho vận tốc (quy đổi ra pixel)
     
-    n = len(centroids)
-    visited = [False] * n
+    for obj_id in ids:
+        trace = trajectories[obj_id]
+        if not trace:
+            continue
+            
+        curr_pos = trace[-1]
+        
+        # Tính vận tốc trung bình 5 frame cuối
+        vx, vy = 0.0, 0.0
+        if len(trace) >= 5:
+            past_pos = trace[-5]
+            vx = (curr_pos[0] - past_pos[0]) / 5.0
+            vy = (curr_pos[1] - past_pos[1]) / 5.0
+        elif len(trace) >= 2:
+            past_pos = trace[0]
+            dt = len(trace) - 1
+            vx = (curr_pos[0] - past_pos[0]) / dt
+            vy = (curr_pos[1] - past_pos[1]) / dt
+            
+        # Feature: [x, y, w*vx, w*vy]
+        features.append([
+            curr_pos[0], 
+            curr_pos[1], 
+            vx * velocity_weight, 
+            vy * velocity_weight
+        ])
+        
+    if not features:
+        return []
+        
+    X = np.array(features)
     groups = []
+    
+    # Sử dụng DBSCAN nếu có sklearn (Ưu tiên)
+    if SKLEARN_AVAILABLE:
+        try:
+            from sklearn.cluster import DBSCAN
+            # eps ở đây áp dụng cho cả vector [x,y, vx, vy]
+            clustering = DBSCAN(eps=eps, min_samples=min_samples).fit(X)
+            labels = clustering.labels_
+            
+            unique_labels = set(labels)
+            for label in unique_labels:
+                if label == -1: # Outlier
+                    continue
+                
+                group_indices = np.where(labels == label)[0]
+                if len(group_indices) >= min_samples:
+                    group_ids = [ids[i] for i in group_indices]
+                    groups.append(group_ids)
+            return groups
+            
+        except ImportError:
+            pass # Fallback to manual
+            
+    # Fallback: Manual Clustering (Simplified, only Position)
+    # Vì viết lại DBSCAN đầy đủ hơi dài, ta dùng logic cũ cải tiến nhẹ
+    n = len(X)
+    visited = [False] * n
     
     for i in range(n):
         if visited[i]:
             continue
-        
-        # Bắt đầu một nhóm mới với người thứ i
-        current_group = [person_ids[i]]
+            
+        current_group = [ids[i]]
         visited[i] = True
         
-        # Tìm tất cả những người khác gần người này
         for j in range(n):
             if i == j or visited[j]:
                 continue
             
-            # Tính khoảng cách Euclid: sqrt((x2-x1)² + (y2-y1)²)
-            distance = np.linalg.norm(centroids[i] - centroids[j])
+            # Tính khoảng cách trên không gian feature mở rộng
+            dist = np.linalg.norm(X[i] - X[j])
             
-            if distance <= eps:
-                current_group.append(person_ids[j])
+            if dist <= eps:
+                current_group.append(ids[j])
                 visited[j] = True
-        
-        # Chỉ thêm nhóm nếu đủ số lượng người tối thiểu
+                
         if len(current_group) >= min_samples:
             groups.append(current_group)
-    
+
     return groups
     
-    if len(centroid_list) < min_group_size:
-        return []
-    
-    person_ids = [item[0] for item in centroid_list]
-    centroids = np.array([item[1] for item in centroid_list])
-    
-    n = len(centroids)
-    visited = [False] * n
-    groups = []
-    
-    for i in range(n):
-        if visited[i]:
-            continue
-        
-        # Bắt đầu một nhóm mới với người thứ i
-        current_group = [person_ids[i]]
-        visited[i] = True
-        
-        # Tìm tất cả những người khác gần người này
-        for j in range(n):
-            if i == j or visited[j]:
-                continue
-            
-            # Tính khoảng cách Euclid: sqrt((x2-x1)² + (y2-y1)²)
-            distance = np.linalg.norm(centroids[i] - centroids[j])
-            
-            if distance <= distance_threshold:
-                current_group.append(person_ids[j])
-                visited[j] = True
-        
-        # Chỉ thêm nhóm nếu đủ số lượng người tối thiểu
-        if len(current_group) >= min_group_size:
-            groups.append(current_group)
-    
-    return groups
+
 
 
 def check_fall_simple(bbox: Tuple[int, int, int, int], threshold: float = 1.2) -> bool:
@@ -237,6 +263,118 @@ def euclidean_distance(point1: Tuple[float, float],
         Distance in pixels
     """
     return np.sqrt((point2[0] - point1[0])**2 + (point2[1] - point1[1])**2)
+
+
+def analyze_trajectories(trajectories: Dict[int, List[Tuple[int, int]]], 
+                         min_length: int = 10,
+                         n_clusters: int = 3,
+                         anomaly_threshold: float = 2.0) -> Dict[int, str]:
+    """
+    Phân tích quỹ đạo chuyển động để phát hiện bất thường dựa trên Clustering (Gom nhóm).
+    
+    Nguyên lý:
+    - Trích xuất đặc trưng từ quỹ đạo: [startX, startY, endX, endY, mean_angle]
+    - Sử dụng K-Means để gom nhóm các quỹ đạo "bình thường" (đi theo luồng phổ biến).
+    - Các quỹ đạo xa tâm cụm (outliers) được coi là bất thường.
+    
+    Tham số:
+        trajectories: Dict {id: list of points}
+        min_length: Độ dài tối thiểu của quỹ đạo để phân tích
+        n_clusters: Số lượng luồng di chuyển chính (giả định)
+        anomaly_threshold: Hệ số khoảng cách để coi là bất thường (so với std dev)
+        
+    Trả về:
+        results: Dict {id: 'NORMAL_TRAJECTORY' | 'ANOMALY_TRAJECTORY' | 'UNKNOWN'}
+    """
+    if not SKLEARN_AVAILABLE:
+        print("Cảnh báo: Scikit-learn chưa được cài đặt. Bỏ qua phân tích quỹ đạo.")
+        return {}
+        
+    # 1. Lọc và chuẩn bị dữ liệu
+    valid_ids = []
+    features_list = []
+    
+    for obj_id, trace in trajectories.items():
+        if len(trace) < min_length:
+            continue
+            
+        # Trích xuất đặc trưng
+        feat = extract_trajectory_features(trace)
+        valid_ids.append(obj_id)
+        features_list.append(feat)
+        
+    # Cần ít nhất (n_clusters + 1) mẫu để chạy clustering hiệu quả
+    if len(features_list) <= n_clusters + 1:
+        return {}
+        
+    X = np.array(features_list)
+    
+    # 2. Chạy K-Means Clustering
+    try:
+        kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
+        kmeans.fit(X)
+        
+        # 3. Tính khoảng cách đến tâm cụm gần nhất
+        # dists[i] là khoảng cách từ mẫu i đến tâm cụm của nó
+        cluster_centers = kmeans.cluster_centers_
+        labels = kmeans.labels_
+        
+        dists = []
+        for i, label in enumerate(labels):
+            center = cluster_centers[label]
+            dist = np.linalg.norm(X[i] - center)
+            dists.append(dist)
+        dists = np.array(dists)
+        
+        # 4. Xác định ngưỡng bất thường (Dựa trên thống kê khoảng cách)
+        # Những điểm có khoảng cách lớn hơn mean + k * std là bất thường
+        mean_dist = np.mean(dists)
+        std_dist = np.std(dists)
+        threshold_val = mean_dist + anomaly_threshold * std_dist
+        
+        # 5. Gán nhãn kết quả
+        results = {}
+        for i, obj_id in enumerate(valid_ids):
+            if dists[i] > threshold_val:
+                results[obj_id] = "ANOMALY_TRAJECTORY"
+            else:
+                results[obj_id] = "NORMAL_TRAJECTORY"
+                
+        return results
+        
+    except Exception as e:
+        print(f"Lỗi khi phân tích quỹ đạo: {e}")
+        return {}
+
+
+def extract_trajectory_features(trace: List[Tuple[int, int]]) -> List[float]:
+    """
+    Trích xuất feature vector từ quỹ đạo.
+    Feature: [StartX, StartY, EndX, EndY, DirectX, DirectY]
+    """
+    path = np.array(trace)
+    
+    start_pt = path[0]
+    end_pt = path[-1]
+    
+    # Vector hướng tổng quát (từ đầu đến cuối)
+    direction = end_pt - start_pt
+    norm = np.linalg.norm(direction)
+    if norm > 0:
+        direction = direction / norm
+    else:
+        direction = np.array([0, 0])
+        
+    # Feature vector: [sx, sy, ex, ey, dx, dy]
+    # Lưu ý: Nên chuẩn hóa tọa độ theo kích thước ảnh nếu có thể, 
+    # nhưng ở đây ta dùng tọa độ thô (pixel) giả định camera cố định.
+    features = [
+        start_pt[0], start_pt[1],
+        end_pt[0], end_pt[1],
+        direction[0] * 100, direction[1] * 100 # Scale direction lên để cân bằng trọng số với tọa độ
+    ]
+    
+    return features
 
 
 if __name__ == "__main__":

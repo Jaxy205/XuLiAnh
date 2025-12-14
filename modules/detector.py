@@ -13,7 +13,6 @@ from .logic import (
     check_gathering, 
     get_centroid,
     check_fall_simple,
-    analyze_trajectories
 )
 from .tracker import TrackerWrapper
 from .visualizer import Visualizer
@@ -46,8 +45,6 @@ class HybridAnomalyDetector:
         # Frame trước đó để tính Optical Flow
         self.prev_gray = None
         
-        # Trạng thái quỹ đạo (Caching kết quả phân tích)
-        self.trajectory_status = {}
         self.process_count = 0
         
         print("✓ Hệ thống khởi tạo thành công!\n")
@@ -79,10 +76,6 @@ class HybridAnomalyDetector:
         # Cập nhật bộ đếm frame xử lý nội bộ
         self.process_count += 1
         
-        # Phân tích quỹ đạo định kỳ (ví dụ: mỗi 30 frame ~ 1 giây)
-        if self.config.ENABLE_TRAJECTORY_DETECTION and self.process_count % 30 == 0:
-            current_trajectories = self.tracker.get_trajectories()
-            self.trajectory_status = analyze_trajectories(current_trajectories)
 
         centroid_list = []
         active_ids = []
@@ -128,13 +121,6 @@ class HybridAnomalyDetector:
                     color = self.config.COLOR_RUNNING
                     info['flow_magnitude'] = flow_magnitude
 
-            if (status == "NORMAL" and self.config.ENABLE_TRAJECTORY_DETECTION 
-                and person_id in self.trajectory_status):
-                traj_res = self.trajectory_status[person_id]
-                if traj_res == "ANOMALY_TRAJECTORY":
-                    status = "ANOMALY_TRAJECTORY"
-                    color = self.config.COLOR_TRAJECTORY_ANOMALY
-                    info['traj_anomaly'] = True
             
             detection_results[person_id] = (status, color, bbox, info)
         

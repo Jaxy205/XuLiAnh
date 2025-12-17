@@ -6,11 +6,7 @@ Cài đặt: Optical Flow (Luồng quang học) cho phát hiện chạy và Kho�
 import cv2
 import numpy as np
 from typing import List, Tuple, Dict
-try:
-    from sklearn.cluster import KMeans
-    SKLEARN_AVAILABLE = True
-except ImportError:
-    SKLEARN_AVAILABLE = False
+from sklearn.cluster import DBSCAN
 
 
 
@@ -149,54 +145,21 @@ def check_gathering(trajectories: Dict[int, List[Tuple[int, int]]],
     X = np.array(features)
     groups = []
     
-    # Sử dụng DBSCAN nếu có sklearn (Ưu tiên)
-    if SKLEARN_AVAILABLE:
-        try:
-            from sklearn.cluster import DBSCAN
-            # eps ở đây áp dụng cho cả vector [x,y, vx, vy]
-            clustering = DBSCAN(eps=eps, min_samples=min_samples).fit(X)
-            labels = clustering.labels_
-            
-            unique_labels = set(labels)
-            for label in unique_labels:
-                if label == -1: # Outlier
-                    continue
-                
-                group_indices = np.where(labels == label)[0]
-                if len(group_indices) >= min_samples:
-                    group_ids = [ids[i] for i in group_indices]
-                    groups.append(group_ids)
-            return groups
-            
-        except ImportError:
-            pass # Fallback to manual
-            
-    # Fallback: Manual Clustering (Simplified, only Position)
-    # Vì viết lại DBSCAN đầy đủ hơi dài, ta dùng logic cũ cải tiến nhẹ
-    n = len(X)
-    visited = [False] * n
+    # Sử dụng DBSCAN từ sklearn
+    # eps ở đây áp dụng cho cả vector [x,y, vx, vy]
+    clustering = DBSCAN(eps=eps, min_samples=min_samples).fit(X)
+    labels = clustering.labels_
     
-    for i in range(n):
-        if visited[i]:
+    unique_labels = set(labels)
+    for label in unique_labels:
+        if label == -1: # Outlier
             continue
-            
-        current_group = [ids[i]]
-        visited[i] = True
         
-        for j in range(n):
-            if i == j or visited[j]:
-                continue
+        group_indices = np.where(labels == label)[0]
+        if len(group_indices) >= min_samples:
+            group_ids = [ids[i] for i in group_indices]
+            groups.append(group_ids)
             
-            # Tính khoảng cách trên không gian feature mở rộng
-            dist = np.linalg.norm(X[i] - X[j])
-            
-            if dist <= eps:
-                current_group.append(ids[j])
-                visited[j] = True
-                
-        if len(current_group) >= min_samples:
-            groups.append(current_group)
-
     return groups
     
 
@@ -235,13 +198,13 @@ def check_fall_simple(bbox: Tuple[int, int, int, int], threshold: float = 1.2) -
 
 def get_centroid(bbox: Tuple[int, int, int, int]) -> Tuple[float, float]:
     """
-    Calculate centroid (center point) of bounding box
+    Tính tâm (centroid) của bounding box.
     
     Args:
         bbox: (x1, y1, x2, y2)
     
     Returns:
-        (cx, cy) centroid coordinates
+        (cx, cy): Tọa độ tâm
     """
     x1, y1, x2, y2 = bbox
     cx = (x1 + x2) / 2.0
@@ -252,15 +215,15 @@ def get_centroid(bbox: Tuple[int, int, int, int]) -> Tuple[float, float]:
 def euclidean_distance(point1: Tuple[float, float], 
                        point2: Tuple[float, float]) -> float:
     """
-    Calculate Euclidean distance between two points
-    d = sqrt((x2-x1)² + (y2-y1)²)
+    Tính khoảng cách Euclid giữa hai điểm.
+    d = sqrt((x2-x1)^2 + (y2-y1)^2)
     
     Args:
         point1: (x1, y1)
         point2: (x2, y2)
     
     Returns:
-        Distance in pixels
+        Khoảng cách theo pixel
     """
     return np.sqrt((point2[0] - point1[0])**2 + (point2[1] - point1[1])**2)
 

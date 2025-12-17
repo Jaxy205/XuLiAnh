@@ -127,7 +127,7 @@ class HybridAnomalyDetector:
         gathering_ids = set()
         gathering_groups = []
         if self.config.ENABLE_GATHERING_DETECTION:
-            # Use trajectories for gathering detection
+            # Sử dụng quỹ đạo di chuyển (trajectories) để phát hiện tụ tập
             current_trajectories = self.tracker.get_trajectories()
             gathering_groups = check_gathering(
                 current_trajectories,
@@ -202,11 +202,11 @@ class HybridAnomalyDetector:
         frame_count = 0
         start_time = time.time()
         
-        print("\n🎬 Bắt đầu xử lý video...\n")
+        print("\n Bắt đầu xử lý video...\n")
         print("Các Module Phát hiện đang hoạt động:")
-        print(f"  ✓ Phát hiện Chạy: {'BẬT' if self.config.ENABLE_RUNNING_DETECTION else 'TẮT'}")
-        print(f"  ✓ Phát hiện Ngã: {'BẬT' if self.config.ENABLE_FALLING_DETECTION else 'TẮT'}")
-        print(f"  ✓ Phát hiện Tụ tập: {'BẬT' if self.config.ENABLE_GATHERING_DETECTION else 'TẮT'}")
+        print(f"   Phát hiện Chạy: {'BẬT' if self.config.ENABLE_RUNNING_DETECTION else 'TẮT'}")
+        print(f"   Phát hiện Ngã: {'BẬT' if self.config.ENABLE_FALLING_DETECTION else 'TẮT'}")
+        print(f"   Phát hiện Tụ tập: {'BẬT' if self.config.ENABLE_GATHERING_DETECTION else 'TẮT'}")
 
         
         try:
@@ -239,7 +239,7 @@ class HybridAnomalyDetector:
                     print(f"Tiến độ: {progress:.1f}% ({frame_count}/{total_frames} frames)")
         
         except KeyboardInterrupt:
-            print("\n⚠ Bị ngắt bởi người dùng")
+            print("\n Bị ngắt bởi người dùng")
         
         finally:
             cap.release()
@@ -251,7 +251,7 @@ class HybridAnomalyDetector:
             avg_fps = frame_count / elapsed_time if elapsed_time > 0 else 0
             
             print("\n" + "="*80)
-            print("✓ Xử lý hoàn tất!")
+            print(" Xử lý hoàn tất!")
             print(f"  Tổng số frame: {frame_count}")
             print(f"  Thời gian: {elapsed_time:.2f}s")
             print(f"  FPS trung bình: {avg_fps:.2f}")

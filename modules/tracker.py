@@ -26,7 +26,7 @@ class TrackerWrapper:
         Trả về:
             tracked_objects: Mảng numpy shape (N, 5) -> [x1, y1, x2, y2, id]
         """
-        # SORT expects [x1, y1, x2, y2, score]
+        # SORT mong đợi đầu vào là [x1, y1, x2, y2, score]
         
         if len(detections) == 0:
             tracks = self.tracker.update(np.empty((0, 5)))
@@ -37,7 +37,7 @@ class TrackerWrapper:
         # Định dạng này khớp với yêu cầu đầu ra của TrackerWrapper
         
         # Đảm bảo int cho tọa độ và id, giữ nguyên format array
-        # Tuy nhiên SORT trả về float, nên ta có thể cast về int khi sử dụng hoặc ở đây
+        # SORT có thể trả về float, nên ta có thể cast về int khi sử dụng
         # Output mong đợi là [x1, y1, x2, y2, id]
         
         return tracks

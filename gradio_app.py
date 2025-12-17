@@ -6,7 +6,8 @@ from config import Config
 from modules import HybridAnomalyDetector
 import time
 
-def process_video(video_path, enable_running, enable_falling, enable_gathering):
+def process_video(video_path, enable_running, enable_falling, enable_gathering, 
+                  conf_threshold, flow_threshold, fall_ratio, gather_eps, gather_min_samples):
     """
     Hàm xử lý video cho Gradio Interface.
     Chạy detector trên video đầu vào và trả về đường dẫn video kết quả.
@@ -25,7 +26,14 @@ def process_video(video_path, enable_running, enable_falling, enable_gathering):
     config.ENABLE_FALLING_DETECTION = enable_falling
     config.ENABLE_GATHERING_DETECTION = enable_gathering
     config.SAVE_OUTPUT = True
-    config.DISPLAY_FPS = True
+    config.DISPLAY_FPS = False
+    
+    # Cập nhật tham số từ UI
+    config.YOLO_CONF_THRESHOLD = conf_threshold
+    config.OPTICAL_FLOW_THRESHOLD = flow_threshold
+    config.FALL_RATIO_THRESHOLD = fall_ratio
+    config.GATHERING_EPS = gather_eps
+    config.GATHERING_MIN_SAMPLES = int(gather_min_samples)
     
     detector = HybridAnomalyDetector(config)
     
@@ -97,6 +105,16 @@ def create_ui():
                 cb_falling = gr.Checkbox(label="Phát hiện NGÃ (Falling)", value=True)
                 cb_gathering = gr.Checkbox(label="Phát hiện TỤ TẬP (Gathering)", value=True)
                 
+                gr.Markdown("### Tham số Nâng cao")
+                # Khởi tạo config để lấy giá trị mặc định
+                default_config = Config()
+                
+                slider_conf = gr.Slider(minimum=0.1, maximum=1.0, value=default_config.YOLO_CONF_THRESHOLD, step=0.05, label="Ngưỡng tin cậy YOLO")
+                slider_flow = gr.Slider(minimum=1.0, maximum=10.0, value=default_config.OPTICAL_FLOW_THRESHOLD, step=0.5, label="Ngưỡng Optical Flow (Chạy)")
+                slider_fall = gr.Slider(minimum=0.5, maximum=3.0, value=default_config.FALL_RATIO_THRESHOLD, step=0.1, label="Ngưỡng tỷ lệ khung hình (Ngã)")
+                slider_eps = gr.Slider(minimum=10, maximum=200, value=default_config.GATHERING_EPS, step=10, label="Khoảng cách Tụ tập (pixel)")
+                slider_samples = gr.Slider(minimum=2, maximum=10, value=default_config.GATHERING_MIN_SAMPLES, step=1, label="Số người Tụ tập tối thiểu")
+                
                 btn_process = gr.Button("🚀 Bắt đầu Xử lý", variant="primary")
             
             with gr.Column():
@@ -105,7 +123,10 @@ def create_ui():
         
         btn_process.click(
             fn=process_video,
-            inputs=[input_video, cb_running, cb_falling, cb_gathering],
+            inputs=[
+                input_video, cb_running, cb_falling, cb_gathering,
+                slider_conf, slider_flow, slider_fall, slider_eps, slider_samples
+            ],
             outputs=[output_video],
             show_progress=True
         )
